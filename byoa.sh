@@ -64,14 +64,14 @@ ls -1 /byoa/byoa_deploy_* 2> /dev/null | while read line ; do
   cidr=$subnet_base$subnet_third_octet.0/24
   cp -r byoa $deployment_id
   cd $deployment_id
-  date +%s > time.log
+#  date +%s > time.log # this has been moved in the byoa repo
   touch "/byoa/${deployment_name}.ongoing"
   template_file=vcenter.json
   contents="$(jq '.vcenter.folder = "'$deployment_id'" |
            .vcenter.vip_network.cidr = "'$cidr'" ' $template_file)"
   echo "${contents}" | tee vcenter.json > /dev/null
   tf_init_apply "Create AKO infra for ${deployment_name} at $(date)"  deploy.stdout deploy.errors vcenter.json
-  date +%s > time.log
+#  date +%s > time.log
   rm -f "/byoa/${deployment_name}.ongoing"
   touch "/byoa/${deployment_name}.done"
   terraform output | tee -a "/byoa/${deployment_name}.done"
@@ -81,7 +81,7 @@ done
 # Check for deployment(s) to destroy manually
 #
 ls -1 /byoa/byoa_destroy_* 2> /dev/null | while read line ; do
-  sudo rm -f $line
+  rm -f $line
   deployment_id=$(echo $line | awk -F'_' '{print $3}')-byoa
   deployment_name=$(echo $line | awk -F'_' '{print $3}')
   cd $deployment_id
