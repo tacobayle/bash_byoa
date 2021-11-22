@@ -115,6 +115,13 @@ else
     cd byoa_deploying_$deployment_id
     echo "$(date): Deploying deployment basic-ako id $deployment_id"
     tf_init_apply deploy.stdout deploy.stderr vcenter.json
+    tf_output=$(terraform output -json | jq 'del(.Destroy_command_all)' | jq 'del(.Destroy_command_wo_tf)')
+    echo $tf_output | jq -r '. | keys[]' | while read line
+    do
+      echo $line | tee -a deployment.info > /dev/null
+      echo $tf_output | jq -r .${line}.value | tee -a deployment.info > /dev/null
+      echo "-----------" | tee -a deployment.info > /dev/null
+    done
     cd - >/dev/null
     mv byoa_deploying_$deployment_id byoa_available_$deployment_id
     echo "$(date): Deployment basic-ako id $deployment_id fully deployed"
