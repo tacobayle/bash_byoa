@@ -16,43 +16,62 @@ template_file=vcenter.json
 source /home/ubuntu/.profile
 #
 tf_init_apply () {
-  # $1 messsage to display
-  # $2 is the log path file for tf stdout
-  # $3 is the log path file for tf error
-  # $4 is var-file to feed TF with variables
-  echo "---------------------------------------------------------------------------------"
-  echo $1
-  echo "---------------------------------------------------------------------------------"
-  terraform init > $2 2>$3
-  if [ -s "$3" ] ; then
+  # $1 is the log path file for tf stdout
+  # $2 is the log path file for tf error
+  # $3 is var-file to feed TF with variables
+  terraform init > $1 2>$2
+  if [ -s "$2" ] ; then
     echo "TF Init ERRORS:"
-    cat $3
+    cat $2
+    temp_id=$(basename $(pwd) | awk -F'_' '{print $3}')
+    curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment id '$(echo $temp_id)' TF init failed"}' $SLACK_WEBHOOK_BYOA
     exit 1
   else
-    rm $2 $3
+    rm $1 $2
   fi
-  terraform apply -auto-approve -var-file=$4 > $2 2>$3
-  if [ -s "$3" ] ; then
+  terraform apply -auto-approve -var-file=$3 > $1 2>$2
+  if [ -s "$2" ] ; then
     echo "TF Apply ERRORS:"
-    cat $3
+    cat $2
+    temp_id=$(basename $(pwd) | awk -F'_' '{print $3}')
+    curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment id '$(echo $temp_id)' TF apply failed"}' $SLACK_WEBHOOK_BYOA
     exit 1
   fi
 }
 tf_destroy () {
-  # $1 messsage to display
-  # $2 is the log path file for tf stdout
-  # $3 is the log path file for tf error
-  # $4 is var-file to feed TF with variables
-  echo "---------------------------------------------------------------------------------"
-  echo $1
-  echo "---------------------------------------------------------------------------------"
-  terraform destroy -auto-approve -var-file=$4 > $2 2>$3
-  if [ -s "$3" ] ; then
+  # $1 is the log path file for tf stdout
+  # $2 is the log path file for tf error
+  # $3 is var-file to feed TF with variables
+  terraform destroy -auto-approve -var-file=$3 > $1 2>$2
+  if [ -s "$2" ] ; then
     echo "TF Apply ERRORS:"
-    cat $3
+    cat $2
+    temp_id=$(basename $(pwd) | awk -F'_' '{print $3}')
+    curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment id '$(echo $temp_id)' destroy failed"}' $SLACK_WEBHOOK_BYOA
     exit 1
   fi
 }
+#
+#
+#
+cd /home/ubuntu/bash_byoa
+#
+# Check for deployment(s) to destroy
+#
+while read line ; do
+  if [ "$line" != "" ] ; then
+    if [ ! -f $line/deployment.destroying ]; then
+      cd $line
+      touch deployment.destroying
+      echo "$(date): Destroying deployment basic-ako id '$(echo $line | awk -F'_' '{print $3}')'"
+      $(terraform output -json | jq -r .Destroy_command_wo_tf.value) > ansible_destroy.stdout 2>ansible_destroy.stderr
+      tf_destroy destroy.stdout destroy.stderr vcenter.json
+      cd - >/dev/null
+      rm -fr $line
+      echo "$(date): Deployment basic-ako id '$(echo $line | awk -F'_' '{print $3}')' fully destroyed"
+    fi
+  fi
+done <<< "$(ls -d -1 byoa_deleting_* 2> /dev/null)"
 #
 # Check for max deployment(s)
 #
@@ -60,32 +79,19 @@ if [ $(ls -d -1 byoa_*_* 2> /dev/null | grep . | wc -l) -lt $max_deployment ] ; 
   rm -f max
 fi
 #
-# Check for deployment(s) to destroy
-#
-while read line ; do
-  if [ "$line" != "" ] ; then
-    cd $line
-    echo "line is: $line"
-    $(terraform output -json | jq -r .Destroy_command_wo_tf.value)
-    tf_destroy "Destroy deployment basic-ako id '$(echo $line | awk -F'_' '{print $3}')' at $(date)" destroy.stdout destroy.errors vcenter.json
-    cd -
-    rm -fr $line
-  fi
-done <<< "$(ls -d -1 byoa_deleting_* 2> /dev/null)"
-#
 # Check for deployment(s) to deploy
 #
 let amount_deployment=$(ls -d -1 byoa_deploying_* 2> /dev/null | grep . | wc -l)+$(ls -d -1 byoa_available_* 2> /dev/null | grep . | wc -l)
 #
 if [ $amount_deployment -ge $amount_of_available_deployment ] ; then
-  echo "Available deployments: OK"
+  echo "$(date): Available deployments: OK"
 else
-  echo "Available deployments: NOK"
+  echo "$(date): Available deployments: NOK"
   if [ $(ls -d -1 byoa_*_* 2> /dev/null | grep . | wc -l) -ge $max_deployment ] ; then
     touch max
-    echo "Max deployment reached - need to wait"
+    echo "$(date): Max deployment reached - need to wait"
   else
-    echo "New deployment to be deployed"
+    echo "$(date): New deployment to be deployed"
     # determine which id to use for new deployment
     for deployment_id in $(seq 1 $max_deployment)
     do
@@ -100,15 +106,17 @@ else
         break
       fi
     done
-    echo "deployment id to be used: $deployment_id"
+    echo "$(date): deployment id to be used: $deployment_id"
     cp -r byoa byoa_deploying_$deployment_id
     cidr=$subnet_base$deployment_id.0/24
-    contents="$(jq '.vcenter.folder = "'byoa_$deployment_id'" |
+    contents="$(jq '.vcenter.folder = "'byoa_basic_ako_$deployment_id'" |
            .vcenter.vip_network.cidr = "'$cidr'" ' byoa_deploying_$deployment_id/$template_file)"
     echo "${contents}" | tee byoa_deploying_$deployment_id/$template_file > /dev/null
     cd byoa_deploying_$deployment_id
-    tf_init_apply "Create AKO infra for deployment id: ${deployment_id} at $(date)"  deploy.stdout deploy.errors vcenter.json
-    cd -
+    echo "$(date): Deploying deployment basic-ako id $deployment_id"
+    tf_init_apply deploy.stdout deploy.stderr vcenter.json
+    cd - >/dev/null
     mv byoa_deploying_$deployment_id byoa_available_$deployment_id
+    echo "$(date): Deployment basic-ako id $deployment_id fully deployed"
   fi
 fi

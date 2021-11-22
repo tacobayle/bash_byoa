@@ -37,6 +37,8 @@ class deployment(Resource):
     for key in result_tf_output:
       del result_tf_output[key]['sensitive']
       del result_tf_output[key]['type']
+    del result_tf_output['Destroy_command_all']
+    del result_tf_output['Destroy_command_wo_tf']
     return json.dumps(result_tf_output), 200
 
   def put(self):
@@ -62,11 +64,13 @@ class deployment(Resource):
         userdel = subprocess.run(['sudo', 'userdel', '-r', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         passwd_crypt = subprocess.run(['openssl', 'passwd', '-crypt', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         useradd = subprocess.run(['sudo', 'useradd', '-s', '/bin/bash', '-p', passwd_crypt.stdout.strip(), '-m', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result_id = subprocess.run(['id', '-u', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#         create_ssh_dir = subprocess.run(['sudo', 'runuser', '-l', args['username'], '-c', '\'mkdir /home/' + args['username'] + '/.ssh\''], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # sudo runuser -l nbayle -c 'mkdir /home/nbayle/.ssh'
+#         result_id = subprocess.run(['id', '-u', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
       # mv the repo
       subprocess.run(['mv', available_repo, folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      result_tf_output = subprocess.run(['terraform', 'output', '-json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
-      return {'deployment_type': 'standard-ako', 'status': 'deployed', 'username': args['username']}, 201
+#       result_tf_output = subprocess.run(['terraform', 'output', '-json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
+      return {'deployment_name': 'standard-ako', 'status': 'deployed', 'username': args['username']}, 201
 
   def delete(self):
     args = deploy_args.parse_args()
@@ -80,7 +84,8 @@ class deployment(Resource):
       abort(404, message='Unable to delete deployment called: ' + args['username'] + ' // folder not found')
     folder = username_repo
     subprocess.run(['mv', folder, folder.split('_')[0] + "_deleting_" + folder.split('_')[2]], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return {'deployment_name': args['username'], 'status': 'deleting'}, 204
+    subprocess.run(['sudo', 'userdel', '-r', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return {'deployment_name': 'standard-ako', 'status': 'deleting', 'username': args['username']}, 204
 
 
 api.add_resource(deployment, "/deployment-basic-ako")
