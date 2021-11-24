@@ -5,21 +5,24 @@ import subprocess
 import socket
 from flask import Flask
 from flask_restful import Api, Resource, reqparse, abort
+import string
+import random
 #
 # create command:
-# curl -X PUT -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://127.0.0.1:5000/deployment-basic-ako
+# curl -X POST -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://172.17.0.1:5000/deployment-basic-ako
 # worker = fqdn du worker
 # $arcade_username
 # delete command:
-# curl -X DELETE -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://127.0.0.1:5000/deployment-basic-ako
+# curl -X DELETE -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://172.17.0.1:5000/deployment-basic-ako
 # get command:
-# curl -X GET -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://127.0.0.1:5000/deployment-basic-ako
+# curl -X GET -H "Content-Type: application/json" -d '{"username":"nbayle"}' -w "HTTP response code: %{http_code}\n" http://172.17.0.1:5000/deployment-basic-ako
 
 app = Flask(__name__)
 api = Api(app)
 #
 deploy_args = reqparse.RequestParser()
 deploy_args.add_argument("username", type=str, help="Name of the deployment required", required=True)
+clear_passwords = {}
 #
 #
 class deployment(Resource):
@@ -33,7 +36,7 @@ class deployment(Resource):
         username_repo = repo
         break
     else:
-      abort(404, message='Unable to delete deployment called: ' + args['username'] + ' // folder not found')
+      abort(404, message='Unable to find deployment called: ' + args['username'] + ' // folder not found')
     folder = username_repo
 #     result_tf_output_raw = subprocess.run(['terraform', 'output', '-json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
 #     result_tf_output = json.loads(result_tf_output_raw.stdout.decode("utf-8"))
@@ -46,10 +49,10 @@ class deployment(Resource):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(('8.8.8.8', 1))
     local_ip_address = s.getsockname()[0]
-    return {'message': 'ssh ' + args['username'] + '@' + local_ip_address + '\nPassword is: ' + args['username']}, 201
+    return {'message': 'ssh ' + args['username'] + '@' + local_ip_address + '\nPassword is: ' + clear_passwords[args['username']]}, 201
 #     result_tf_output_raw = subprocess.run(['terraform', 'output', '-json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
 
-  def put(self):
+  def post(self):
     args = deploy_args.parse_args()
     results_item_raw = subprocess.run(['ls'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     results_item = results_item_raw.stdout.decode("utf-8").split("\n")
@@ -67,17 +70,21 @@ class deployment(Resource):
       else:
         abort(429, message= 'Wait few minutes to have a deployment available')
       folder = 'byoa_' + args['username'] + '_' + available_repo.split('_')[2]
-      result_id = subprocess.run(['id', '-u', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      if result_id.returncode != 0:
-        userdel = subprocess.run(['sudo', 'userdel', '-r', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        passwd_crypt = subprocess.run(['openssl', 'passwd', '-crypt', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        useradd = subprocess.run(['sudo', 'useradd', '-s', '/bin/bash', '-p', passwd_crypt.stdout.strip(), '-m', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        subprocess.run(['/bin/bash', 'account_customization.sh', args['username'], folder, available_repo.split('_')[2]], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      subprocess.run(['mv', available_repo, folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#       result_id = subprocess.run(['id', '-u', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      clear_password = ''.join(random.choice(string.ascii_uppercase + string.digits + string.ascii_lowercase) for _ in range(9))
+      global clear_passwords
+      clear_passwords[args['username']] = clear_password
+      subprocess.run(['/bin/bash', '/home/ubuntu/bash_byoa/account_customization.sh', args['username'], '/home/ubuntu/bash_byoa/' + folder, available_repo.split('_')[2], '/home/ubuntu/.ssh', clear_password], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#       if result_id.returncode != 0:
+#         userdel = subprocess.run(['sudo', 'userdel', '-r', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#         passwd_crypt = subprocess.run(['openssl', 'passwd', '-crypt', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#         useradd = subprocess.run(['sudo', 'useradd', '-s', '/bin/bash', '-p', passwd_crypt.stdout.strip(), '-m', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+#         subprocess.run(['/bin/bash', '/hone/ubuntu/bash_byoa/account_customization.sh', args['username'], '/home/ubuntu/bash_byoa/' + folder, available_repo.split('_')[2], '/home/ubuntu/.ssh'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 #         create_ssh_dir = subprocess.run(['sudo', 'runuser', '-l', args['username'], '-c', '\'mkdir /home/' + args['username'] + '/.ssh\''], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         # sudo runuser -l nbayle -c 'mkdir /home/nbayle/.ssh'
 #         result_id = subprocess.run(['id', '-u', args['username']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
       # mv the repo
-      subprocess.run(['mv', available_repo, folder], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 #       result_tf_output_raw = subprocess.run(['terraform', 'output', '-json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
 #       result_tf_output = json.loads(result_tf_output_raw.stdout.decode("utf-8"))
 #       for key in result_tf_output:
@@ -117,7 +124,9 @@ if __name__ == '__main__':
 #   byoa_ttl="86400"
   saml_user="nbayle"
   jinja2_file='/template/vcenter.j2'
-  app.run(debug=True, host="0.0.0.0")
+#   app.run(debug=True, host="0.0.0.0")
+  app.run(host="172.17.0.1")
+
 #   deployment_return=deploy(saml_user)
 #
 #   print(deployment_return)
